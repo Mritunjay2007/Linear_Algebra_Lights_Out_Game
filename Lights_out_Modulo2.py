@@ -1,70 +1,79 @@
 import tkinter as tk
 import numpy as np
 
-GRID_SIZE = 5  # You can change this (e.g., 4, 6, etc.)
+SIZE = 5  # 3x3 grid
 
-class LightsOutGame:
+class LightsOut:
     def __init__(self, master):
         self.master = master
-        self.master.title("Modulo 2 Lights Out Solver")
+        self.buttons = [[None]*SIZE for _ in range(SIZE)]
+        self.states = [[0]*SIZE for _ in range(SIZE)]  # 0 = off, 1 = on
 
-        self.grid = self.generate_solvable_grid()
-        self.buttons = [[None]*GRID_SIZE for _ in range(GRID_SIZE)]
-
-        for i in range(GRID_SIZE):
-            for j in range(GRID_SIZE):
-                btn = tk.Button(master, width=4, height=2, 
-                                bg="black" if self.grid[i][j] else "white",
-                                command=lambda x=i, y=j: self.toggle(x, y))
+        for i in range(SIZE):
+            for j in range(SIZE):
+                btn = tk.Button(master, width=6, height=3,
+                                bg="black", command=lambda x=i, y=j: self.toggle(x, y))
                 btn.grid(row=i, column=j)
                 self.buttons[i][j] = btn
 
-        self.solve_button = tk.Button(master, text="Solve", command=self.solve_with_animation)
-        self.solve_button.grid(row=GRID_SIZE, column=0, columnspan=GRID_SIZE, pady=10)
+        solve_btn = tk.Button(master, text="Solve", command=self.solve)
+        solve_btn.grid(row=SIZE, column=0, columnspan=SIZE, sticky="we")
+
+        self.randomize()
 
     def toggle(self, i, j):
         for x, y in [(i, j), (i-1, j), (i+1, j), (i, j-1), (i, j+1)]:
-            if 0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE:
-                self.grid[x][y] ^= 1
-                self.buttons[x][y].configure(bg="black" if self.grid[x][y] else "white")
+            if 0 <= x < SIZE and 0 <= y < SIZE:
+                self.states[x][y] ^= 1
+                self.update_button(x, y)
+        if all(self.states[i][j] == 0 for i in range(SIZE) for j in range(SIZE)):
+            print("🎉 You win!")
 
-    def solve_with_animation(self):
-        A = self.build_matrix()
-        b = self.grid.flatten()
-        x = self.gaussian_elimination_mod2(A, b)
+    def update_button(self, i, j):
+        color = "yellow" if self.states[i][j] else "black"
+        self.buttons[i][j].config(bg=color)
 
-        if x is None:
-            print("No solution")
-            return
+    def randomize(self):
+        import random
+        for i in range(SIZE):
+            for j in range(SIZE):
+                if random.choice([True, False]):
+                    self.toggle(i, j)
 
-        steps = [(divmod(idx, GRID_SIZE)) for idx, val in enumerate(x) if val == 1]
+    def index(self, i, j):
+        return i * SIZE + j
 
-        def animate_step(i):
-            if i >= len(steps):
-                return
-            r, c = steps[i]
-            self.buttons[r][c].configure(bg="red")
-            self.master.after(200, lambda: finish_step(r, c, i))
+    def build_toggle_matrix(self):
+        n = SIZE * SIZE
+        A = np.zeros((n, n), dtype=int)
 
-        def finish_step(r, c, i):
-            self.toggle(r, c)
-            self.master.after(300, lambda: animate_step(i + 1))
-
-        self.master.after(0, lambda: animate_step(0))
-
-    def build_matrix(self):
-        size = GRID_SIZE * GRID_SIZE
-        A = np.zeros((size, size), dtype=int)
-        for i in range(GRID_SIZE):
-            for j in range(GRID_SIZE):
-                idx = i * GRID_SIZE + j
-                A[idx][idx] = 1
-                for x, y in [(i-1,j), (i+1,j), (i,j-1), (i,j+1)]:
-                    if 0 <= x < GRID_SIZE and 0 <= y < GRID_SIZE:
-                        A[idx][x * GRID_SIZE + y] = 1
+        for i in range(SIZE):
+            for j in range(SIZE):
+                idx = self.index(i, j)
+                A[idx, idx] = 1
+                for x, y in [(i-1,j),(i+1,j),(i,j-1),(i,j+1)]:
+                    if 0 <= x < SIZE and 0 <= y < SIZE:
+                        A[idx, self.index(x, y)] = 1
         return A
 
-    def gaussian_elimination_mod2(self, A, b):
+    def solve(self):
+        n = SIZE * SIZE
+        A = self.build_toggle_matrix()
+        b = np.array([self.states[i][j] for i in range(SIZE) for j in range(SIZE)])
+
+        # Solve A·x = b (mod 2)
+        x = self.solve_mod2(A, b)
+        if x is None:
+            print("No solution.")
+        else:
+            print("Solution: press these cells:")
+            for i in range(n):
+                if x[i] == 1:
+                    row, col = divmod(i, SIZE)
+                    print(f"({row}, {col})")
+
+    def solve_mod2(self, A, b):
+        """Solves Ax = b mod 2 using Gaussian elimination."""
         A = A.copy()
         b = b.copy()
         n = len(b)
@@ -72,33 +81,31 @@ class LightsOutGame:
         for col in range(n):
             pivot_row = None
             for row in range(col, n):
-                if A[row][col] == 1:
+                if A[row, col] == 1:
                     pivot_row = row
                     break
             if pivot_row is None:
-                continue
+                continue  # no pivot in this column
+
+            # Swap rows
             A[[col, pivot_row]] = A[[pivot_row, col]]
             b[col], b[pivot_row] = b[pivot_row], b[col]
 
+            # Eliminate below and above
             for row in range(n):
-                if row != col and A[row][col] == 1:
-                    A[row] ^= A[col]
-                    b[row] ^= b[col]
+                if row != col and A[row, col] == 1:
+                    A[row] = (A[row] + A[col]) % 2
+                    b[row] = (b[row] + b[col]) % 2
 
+        # Check for inconsistency
         for row in range(n):
-            if not A[row].any() and b[row]:
-                return None
+            if not A[row].any() and b[row] != 0:
+                return None  # No solution
 
-        return b
+        return b  # b now holds the solution vector
 
-    def generate_solvable_grid(self):
-        A = self.build_matrix()
-        size = GRID_SIZE * GRID_SIZE
-        x = np.random.randint(0, 2, size)  # Random solution
-        b = A @ x % 2                      # Apply A * x mod 2
-        return b.reshape((GRID_SIZE, GRID_SIZE))
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    game = LightsOutGame(root)
-    root.mainloop()
+# Run GUI
+root = tk.Tk()
+root.title("Lights Out Solver")
+game = LightsOut(root)
+root.mainloop()
